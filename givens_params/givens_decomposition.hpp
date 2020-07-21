@@ -1,9 +1,8 @@
 #ifndef GIVENS_DECOMPOSITION_HPP
 #define GIVENS_DECOMPOSITION_HPP
 
+#include <complex>
 #include <itpp/itcomm.h>
-
-#define I std::complex<double>(0,1)
 
 typedef struct {
         itpp::vec t;

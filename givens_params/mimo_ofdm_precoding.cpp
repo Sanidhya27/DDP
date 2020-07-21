@@ -1,6 +1,8 @@
 #include <fstream>
 #include "givens_decomposition.hpp"
 
+#define I std::complex<double>(0,1)
+
 using namespace itpp;
 using std::cout;
 using std::cin;
