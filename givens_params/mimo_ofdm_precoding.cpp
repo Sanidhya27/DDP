@@ -14,7 +14,7 @@ cmat generate_channel(int L,int t,int r) {
   return h;
 }
 
-cmat take_fft(cmat h,int IFFT_size) {
+cmat take_fft(const cmat &h,int IFFT_size) {
   cmat H;
   for(int i=0;i<h.rows();i++){
     H.append_row(fft(h.get_row(i),IFFT_size));
@@ -83,19 +83,9 @@ int main(int argc, char *argv[])
     for(int i=0;i<t;i++){
       ofdm_out.append_row(ofdm.modulate(symbols.get_row(i)));
     }
-    // cout<<"symbols"<<symbols<<endl;
-    // cout<<"ofdm_out"<<ofdm_out<<endl;
     int z = IFFT_size+CP_size;
     int x = ofdm_out.cols()/z;
-    // h = ones_c(r*t,L);
-    // h.set_row(1, 1*ones_c(L));
-    // h.set_row(2, 3*ones_c(L));
-
-
-    // cout<<"h"<<h<<endl;
     for(int k=0;k<x;k++){
-      	// h = "0.449311+1.0786i; 0.0145245+0.010007i";
-  		// h="0.449311+1.0786i; 0.0145245+0.010007i; -0.337605+0.778781i;-0.136933+0.0569123i";
       h = generate_channel(L,t,r);
       rec.del_rows(0,rec.rows()-1);
       for(int i=0;i<r;i++){
@@ -106,7 +96,7 @@ int main(int argc, char *argv[])
           rec.append_row(temp+1*sqrt(N0) * randn_c(temp.length()));
       }
 
-      H = take_fft(h,IFFT_size);
+      H = take_fft(h, IFFT_size);
       cmat A;
       cmat dec;
       for(int i=0;i<rec.rows();i++){
@@ -116,6 +106,7 @@ int main(int argc, char *argv[])
       rec.del_cols(IFFT_size,IFFT_size+CP_size-1);
       for(int i=0;i<rec.cols();i++){
         A = transpose(reshape(H.get_col(i),t,r));
+        // Look at Octave pinv function
         if(r>=t)
           dec.append_col(inv(hermitian_transpose(A)*A)*hermitian_transpose(A)*rec.get_col(i));
         else
