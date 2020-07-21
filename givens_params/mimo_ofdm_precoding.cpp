@@ -28,6 +28,15 @@ cmat get_precoder(int t) {
 
 int main(int argc, char *argv[])
 {
+        // Always specify t and r
+        if (argc != 3) {
+                cout << "Usage: " << argv[0] << " <t> <r>\n";
+                return 1;
+        }
+
+  int t,r;
+  t = atoi(argv[1]);
+  r = atoi(argv[2]);
   std::ofstream f;
   f.open("mimo_ofdm.txt");
 
@@ -36,11 +45,9 @@ int main(int argc, char *argv[])
 
   int L = 5;
 
-  int t,r;
-  cout<<"No. of transmitters: "<<endl;
-  cin>>t;
-  cout<<"No. of receivers: "<<endl;
-  cin>>r;
+
+  cout<<"No. of transmitters: " << t << "\n";
+  cout<<"No. of receivers: " << r << "\n";
   RNG_randomize();
 
   bmat bits(t,N),dec_bits(t,N);
