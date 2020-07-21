@@ -1,15 +1,10 @@
-#include <itpp/itcomm.h>
+#include "givens_decomposition.hpp"
+
 using namespace itpp;
-#include <fstream>
 using std::cout;
 using std::endl;
-#include <vector>
-#define I std::complex<double>(0,1)
-struct params{
-	vec t;
-	vec p;
-};
-cmat given_matrix(double theta,int a,int b,int s){
+
+cmat given_matrix(double theta,int a,int b,int s) {
 	cmat G = eye_c(s);
 	G(a,a) = cos(theta);
 	G(a,b) = -sin(theta);
@@ -43,7 +38,7 @@ cmat givens_reconstruction(vec phis, vec thetas,int t,int n){
 	M=M*transpose(I_);
 	return M;
 }
-params givens_decomposition(cmat V){
+GIVENSPARAMS givens_decomposition(cmat V){
 	vec thetas;
 	vec phis;
 	cmat D = diag(exp(-1*I*angle(V.get_row(0))));
@@ -71,9 +66,9 @@ params givens_decomposition(cmat V){
 			G(t-k-1,t-k-1) = c;
 			V = G*V;
 		}
-		
+
 	}
-	struct params par;
+	GIVENSPARAMS par;
 	par.t=thetas;
 	par.p=phis;
 	return par;
