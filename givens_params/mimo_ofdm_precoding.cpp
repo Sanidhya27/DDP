@@ -1,145 +1,166 @@
 #include <fstream>
 #include "givens_decomposition.hpp"
-
 #define I std::complex<double>(0,1)
+
+// h -> array of length L, each element is a r x t matrix
+// H -> array of length NFFT, each element is a r x t matrix
+// To get H, we use the formular
+// H[k] = sum (n = 0 to (L - 1)) h[n] exp(-1j * 2 * pi / NFFT * n * k)
+// Then, precoder for k-th subcarrier is obtained using svd of H[k]
 
 using namespace itpp;
 using std::cout;
 using std::cin;
 using std::endl;
 
-cmat generate_channel(int L,int t,int r) {
-  cmat h;
-  for(int i=0;i<t*r;i++){
-    h.append_row(randn_c(L));
-  }
-  return h;
+void generate_channel(cmat *h, int L,int t,int r) {
+    for(int i=0;i<L;i++){
+        h[i] = randn_c(r, t);
+    }
 }
 
-cmat take_fft(const cmat &h,int IFFT_size) {
-  cmat H;
-  for(int i=0;i<h.rows();i++){
-    H.append_row(fft(h.get_row(i),IFFT_size));
-  }
-  return H;
-}
-
-cmat get_precoder(int t) {
-	return eye_c(t);
-}
-
-int main(int argc, char *argv[])
-{
-        // Always specify t and r
-        if (argc != 3) {
-                cout << "Usage: " << argv[0] << " <t> <r>\n";
-                return 1;
+void take_fft(cmat *H, const cmat *h, int L,int IFFT_size) {
+    for (int i = 0; i < IFFT_size; i++) {
+        H[i] = zeros_c(h[0].rows(), h[0].cols());
+        for (int j = 0; j < L; ++j) {
+            H[i] += h[j] * exp(-1*I * 2 * M_PI * j*i / IFFT_size );
         }
-
-  int t,r;
-  t = atoi(argv[1]);
-  r = atoi(argv[2]);
-  std::ofstream f;
-  f.open("mimo_ofdm.txt");
-
-  double N0;
-  int N = 64000;
-
-  int L = 5;
-
-
-  cout<<"No. of transmitters: " << t << "\n";
-  cout<<"No. of receivers: " << r << "\n";
-  RNG_randomize();
-
-  bmat bits(t,N),dec_bits(t,N);
-  QPSK qpsk;
-  BERC berc,berc2;
-  OFDM ofdm;
-
-  int CP_size=6;
-  int IFFT_size = 64;
-
-  // N=4;
-  // L  = 1;
-  // CP_size = 2;
-  // IFFT_size = 2;
-
-  ofdm.set_parameters(IFFT_size,CP_size,1);
-
-  vec snrs_dB="0:2:20";
-  vec snr_linear = inv_dB(snrs_dB);
-
-  bits = randb(t,N); // each transmitter send N bits;
-  cvec temp;
-  cmat h;
-  cmat H;
-  cmat V;
-  // bits = "1 0 0 0 ;1 1 0 0";
-  for (int l = 0; l < snrs_dB.length(); l++) {
-    berc.clear();
-    N0 = 1 / sqrt(snr_linear(l));
-    cmat symbols,ofdm_out,rec;
-    dec_bits = zeros_b(t,N);
-    // cout<<"bits"<<bits<<endl;
-    for(int i=0;i<t;i++){
-      qpsk.modulate_bits(bits.get_row(i), temp);
-      symbols.append_row(temp);
+        H[i]/=IFFT_size;
     }
+}
 
-    V = get_precoder(t);
-    symbols = V*symbols;
-    for(int i=0;i<t;i++){
-      ofdm_out.append_row(ofdm.modulate(symbols.get_row(i)));
+cmat get_svd_precoder(cmat &A) {
+    cmat U,V;
+    vec s;
+    svd(A,U,s,V);
+    // return eye_c(V.rows());
+    return V;
+}
+
+cmat get_svd_postcoder(cmat &A) {
+    cmat U,V;
+    vec s;
+    svd(A,U,s,V);
+    return eye_c(U.rows());
+    // return U;
+}
+
+void filt(cmat &rec, cmat *h, cmat &ofdm_syms, int L, int ofdm_sym_size, int t, int r) {
+    cvec temp;
+    for(int i = 0; i < ofdm_sym_size; i++) {
+        temp = zeros_c(r);
+        for(int j = 0; j < L; j++){
+            if( i-j >= 0)
+                temp+= h[j] * ofdm_syms.get_col(i-j);
+        }
+        rec.set_col(i,temp);
     }
-    int z = IFFT_size+CP_size;
-    int x = ofdm_out.cols()/z;
-    for(int k=0;k<x;k++){
-      h = generate_channel(L,t,r);
-      rec.del_rows(0,rec.rows()-1);
-      for(int i=0;i<r;i++){
-          temp = zeros_c(z);
-          for(int j=0;j<t;j++){
-            temp+=filter(h.get_row(i*t + j),1,ofdm_out.get_row(j)(k*z,(k+1)*z -1));
-          }
-          rec.append_row(temp+1*sqrt(N0) * randn_c(temp.length()));
-      }
+}
 
-      H = take_fft(h, IFFT_size);
-      cmat A;
-      cmat dec;
-      for(int i=0;i<rec.rows();i++){
-        rec.set_row(i,ofdm.demodulate(rec.get_row(i)));
-      }
+cmat pinv(cmat &A){
+    
+    return inv(hermitian_transpose(A)*A)*hermitian_transpose(A);
+}
 
-      rec.del_cols(IFFT_size,IFFT_size+CP_size-1);
-      for(int i=0;i<rec.cols();i++){
-        A = transpose(reshape(H.get_col(i),t,r));
-        // Look at Octave pinv function
-        if(r>=t)
-          dec.append_col(inv(hermitian_transpose(A)*A)*hermitian_transpose(A)*rec.get_col(i));
-        else
-          dec.append_col(hermitian_transpose(A)*inv(A*hermitian_transpose(A))*rec.get_col(i));
-      }
-      bvec temp2;
-      int len;
-     for(int i=0;i<dec.rows();i++){
-      qpsk.demodulate_bits(dec.get_row(i), temp2);
-      len = temp2.length();
-      dec_bits.set_submatrix(i,k*len,reshape(temp2,1,len));
-     }
+int main(int argc, char const *argv[])
+{
+    if (argc != 3) {
+        cout << "Usage: " << argv[0] << " <t> <r>\n";
+        return 1;
     }
-    berc.clear();
-    for(int i=0;i<bits.rows();i++){
-      berc.count(bits.get_row(i), dec_bits.get_row(i));
+    int t,r;
+    t = atoi(argv[1]);
+    r = atoi(argv[2]);
+    cout<<"No. of transmitters: " << t << "\n";
+    cout<<"No. of receivers: " << r << "\n";
+
+    std::ofstream f;
+    f.open("mimo_ofdm.txt");
+    
+    int N_ofdm_syms = 1000;
+    int N_taps = 5;
+    int IFFT_size = 64;
+    int CP_size = 6;
+    int constellation_size = 2;
+
+    QPSK qpsk;
+    BERC berc;
+    OFDM ofdm;
+
+    ofdm.set_parameters(IFFT_size,CP_size,1);
+
+    vec snrs_dB="0:2:20";
+    vec snr_linear = inv_dB(snrs_dB);
+
+    bmat bits[N_ofdm_syms];
+    cmat qpsk_syms = zeros_c(t,IFFT_size);
+    cmat precoded_syms = zeros_c(t,IFFT_size);
+    cmat ofdm_syms = zeros_c(t,IFFT_size + CP_size);
+    cmat rec_syms = zeros_c(r,IFFT_size + CP_size);
+    cmat dec_ofdm_syms = zeros_c(r,IFFT_size);
+    cmat dec_syms = zeros_c(t,IFFT_size);
+    bmat dec_bits[N_ofdm_syms];
+
+    cmat h[N_taps];
+    cmat H[IFFT_size];
+
+    cmat V,U;
+    cvec temp;
+    bvec temp2;
+
+    for(int snr_i = 0; snr_i < snrs_dB.length(); snr_i++) {
+        
+        berc.clear();
+
+        for(int sym_i = 0; sym_i < N_ofdm_syms; sym_i++) {
+            
+            bits[sym_i] = randb(t,constellation_size*IFFT_size);
+
+            for(int i = 0; i < t; i++) {
+                qpsk.modulate_bits(bits[sym_i].get_row(i), temp);
+                qpsk_syms.set_row(i, temp);
+            }
+            generate_channel(h,N_taps,t,r);
+            take_fft(H,h,N_taps,IFFT_size);
+
+            for(int i = 0; i < IFFT_size; i++) {
+                V = get_svd_precoder(H[i]);
+                precoded_syms.set_col(i,V*qpsk_syms.get_col(i));
+            }
+
+            for(int i = 0; i < t; i++) {
+                ofdm_syms.set_row(i, ofdm.modulate(precoded_syms.get_row(i)));
+            }
+
+            filt(rec_syms, h,ofdm_syms,N_taps,IFFT_size + CP_size,t,r);
+
+            rec_syms += 1*randn_c(r,IFFT_size+CP_size)/sqrt(snr_linear(snr_i));
+
+            for(int i = 0; i < r; i++) {
+                dec_ofdm_syms.set_row(i, ofdm.demodulate(rec_syms.get_row(i)));
+            } 
+
+            for(int i = 0; i < IFFT_size; i++) {
+                vec s;
+                svd(H[i],U,s,V);
+                cmat A = hermitian_transpose(U)*H[i]*V;
+                dec_syms.set_col(i,pinv(A)*hermitian_transpose(U)*dec_ofdm_syms.get_col(i));
+            }
+
+            dec_bits[sym_i] = zeros_b(t,IFFT_size*constellation_size);
+
+            for(int i = 0; i < t; i++) {
+                qpsk.demodulate_bits(dec_syms.get_row(i),temp2);
+                dec_bits[sym_i].set_row(i, temp2);
+                berc.count(bits[sym_i].get_row(i),temp2);
+            }
+        }
+        cout << "There were " << berc.get_errors() << " received bits in error." << endl;
+        cout << "There were " << berc.get_corrects() << " correctly received bits." << endl;
+        cout << "The error probability was " << berc.get_errorrate() << endl;
+        f<<berc.get_errorrate() << "\t" << snrs_dB[snr_i]<<endl;
+
     }
-
-    cout << "There were " << berc.get_errors() << " received bits in error." << endl;
-    cout << "There were " << berc.get_corrects() << " correctly received bits." << endl;
-    cout << "The error probability was " << berc.get_errorrate() << endl;
-    f<<berc.get_errorrate() << "\t" << snrs_dB[l]<<endl;
-  }
-  f.close();
-
-   return 0;
+    f.close();
+    return 0;
 }

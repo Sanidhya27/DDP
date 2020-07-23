@@ -1,3 +1,5 @@
 mimo_ofdm_precoding
 *.o
 givens_decomposition_tests
+mimo_ofdm.txt
+*.out
