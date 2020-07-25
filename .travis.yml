@@ -10,5 +10,5 @@ addons:
       - libgtest-dev
       - cmake
 script:
-  - cd /usr/src/gtest && sudo -i cmake CMakeLists.txt && sudo -i make && sudo -i cp *.a /usr/lib && sudo -i ln -s /usr/lib/libgtest.a /usr/local/lib/gtest/libgtest.a && sudo -i ln -s /usr/lib/libgtest_main.a /usr/local/lib/gtest/libgtest_main.a && cd -
+  - sh gtest_build.sh
   - cd givens_params && make && make test
