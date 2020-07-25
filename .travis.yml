@@ -1,0 +1,9 @@
+language: c++
+compiler:
+  - clang
+  - gcc
+addons:
+  apt:
+    packages:
+      - libitpp-dev
+script: cd givens_params && make
