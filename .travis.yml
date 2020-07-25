@@ -2,7 +2,6 @@ dist: bionic
 language: c++
 compiler:
   - clang
-  - gcc
 addons:
   apt:
     packages:

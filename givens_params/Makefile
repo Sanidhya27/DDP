@@ -1,7 +1,9 @@
 all: mimo_ofdm_precoding givens_decomposition_tests
 
 givens_decomposition_tests: givens_decomposition_tests.o givens_decomposition.o
-	$(CXX) -pthread -o $@ $^ -litpp -lgtest -lgtest_main
+	cp /usr/lib/x86_64-linux-gnu/libgtest.a .
+	cp /usr/lib/x86_64-linux-gnu/libgtest_main.a .
+	$(CXX) -pthread -o $@ $^ -L . -litpp -lgtest -lgtest_main
 
 mimo_ofdm_precoding: mimo_ofdm_precoding.o givens_decomposition.o
 	$(CXX) -o $@ $^ -litpp
