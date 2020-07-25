@@ -2,6 +2,7 @@ dist: bionic
 sudo: true
 language: c++
 compiler:
+  - gcc
   - clang
 addons:
   apt:
@@ -9,7 +10,9 @@ addons:
       - libitpp-dev
       - libgtest-dev
       - cmake
+      - wget
 script:
   - sudo sed -i '/^Defaults\tsecure_path.*$/ d' /etc/sudoers
+  - sudo -E sh patch_itpp.sh
   - sudo -E sh gtest_build.sh
   - cd givens_params && make && make test
