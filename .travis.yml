@@ -10,5 +10,5 @@ addons:
       - libgtest-dev
       - cmake
 script:
-  - sudo -i sh gtest_build.sh
+  - sudo -E sh gtest_build.sh
   - cd givens_params && make && make test
