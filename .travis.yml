@@ -6,4 +6,4 @@ addons:
   apt:
     packages:
       - libitpp-dev
-script: cd givens_params && make
+script: cd givens_params && make && make test

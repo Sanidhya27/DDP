@@ -15,6 +15,10 @@ givens_decomposition_tests.o: givens_decomposition_tests.cpp givens_decompositio
 givens_decomposition.o: givens_decomposition.cpp givens_decomposition.hpp
 	$(CXX) -c -o $@ $<
 
-.PHONY: clean
+.PHONY: clean test
+
+test: givens_decomposition_tests
+	./givens_decomposition_tests
+
 clean:
 	$(RM) *.o mimo_ofdm_precoding givens_decomposition_tests
