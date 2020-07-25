@@ -6,4 +6,5 @@ addons:
   apt:
     packages:
       - libitpp-dev
+      - libgtest-dev
 script: cd givens_params && make && make test
