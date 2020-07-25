@@ -10,5 +10,6 @@ addons:
       - libgtest-dev
       - cmake
 script:
+  - sudo sed -i '/^Defaults\tsecure_path.*$/ d' /etc/sudoers
   - sudo -E sh gtest_build.sh
   - cd givens_params && make && make test
