@@ -78,10 +78,10 @@ cmat get_quantised_precoder(cmat &A, int n_bits){
 
 }
 
-double capacity(vec SNR, vec power){
+double capacity(mat &F, int t){
     double sum=0;
-    for(int i=0;i<power.length();i++){
-        sum+=log2(1+power(i)*SNR(i));
+    for(int k=0;k<t;k++){
+        sum+=log2(1+1/(F(k,k)));
     }
     return sum;
 }
@@ -91,12 +91,13 @@ cmat get_svd_precoder(cmat &A) {
     cmat U,V;
     vec s;
     svd(A,U,s,V);
+    // return eye_c(V.rows());
     return V;
 }
 
 cmat get_svd_postcoder(cmat &A) {
 
-    cmat U,V;
+    cmat U,V;   
     vec s;
     svd(A,U,s,V);
     return U;
@@ -135,7 +136,7 @@ int main(int argc, char const *argv[]) {
     std::ofstream f;
     f.open("mimo_ofdm.txt");
     
-    int N_ofdm_syms = 10;
+    int N_ofdm_syms = 1000;
     int N_taps = 5;
     int IFFT_size = 64;
     int CP_size = 6;
@@ -162,12 +163,15 @@ int main(int argc, char const *argv[]) {
     cmat h[N_taps];
     cmat H[IFFT_size];
 
-    cmat V,U;
+    cmat V,U,A;
+    mat F;
     cvec temp;
     bvec temp2;
+    double cap;
 
     bool quantise = 0;
     int n_bits=0;
+
     if (argc == 4) {
         quantise = atoi(argv[3]);
         if(quantise){
@@ -181,10 +185,15 @@ int main(int argc, char const *argv[]) {
         quantise = atoi(argv[3]);
         n_bits = atoi(argv[4]);
     }
+    std::ofstream f1;
+    f1.open("capacity.txt");
+
+    RNG_randomize();
 
     for(int snr_i = 0; snr_i < snrs_dB.length(); snr_i++) {
         
         berc.clear();
+        cap = 0;
 
         for(int sym_i = 0; sym_i < N_ofdm_syms; sym_i++) {
             
@@ -204,7 +213,6 @@ int main(int argc, char const *argv[]) {
                 else 
                     V = get_svd_precoder(H[i]);
 
-                H[i] = H[i] * V;
                 precoded_syms.set_col(i,V*qpsk_syms.get_col(i));
             }
 
@@ -222,7 +230,13 @@ int main(int argc, char const *argv[]) {
 
             for(int i = 0; i < IFFT_size; i++) {
                 U = get_svd_postcoder(H[i]);
-                cmat A = hermitian_transpose(U)*H[i];
+                if(quantise)
+                    V = get_quantised_precoder(H[i],n_bits);
+                else 
+                    V = get_svd_precoder(H[i]);
+                A = hermitian_transpose(U)*H[i]*V;
+                F = real(inv(snr_linear(snr_i)*hermitian_transpose(A)*A));
+                cap+=capacity(F,t);
                 dec_syms.set_col(i,pinv(A)*hermitian_transpose(U)*dec_ofdm_syms.get_col(i));
             }
 
@@ -234,12 +248,13 @@ int main(int argc, char const *argv[]) {
                 berc.count(bits[sym_i].get_row(i),temp2);
             }
         }
-
+        cap/=N_ofdm_syms;
+        cout<<"capacity "<<cap<<endl;
         cout << "There were " << berc.get_errors() << " received bits in error." << endl;
         cout << "There were " << berc.get_corrects() << " correctly received bits." << endl;
         cout << "The error probability was " << berc.get_errorrate() << endl;
         f<<berc.get_errorrate() << "\t" << snrs_dB[snr_i]<<endl;
-
+        f1<<cap<<endl;
     }
 
     f.close();
