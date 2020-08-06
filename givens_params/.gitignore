@@ -4,3 +4,6 @@ givens_decomposition_tests
 mimo_ofdm.txt
 *.out
 *.it
+out
+capacity.txt
+*.txt

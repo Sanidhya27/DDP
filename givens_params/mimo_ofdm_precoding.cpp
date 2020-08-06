@@ -62,19 +62,36 @@ GIVENSPARAMS quantise_params(GIVENSPARAMS par,int n_bits,int t){
     return par;
 }
 
-cmat get_quantised_precoder(cmat &A, int n_bits){
+cmat get_quantised_precoder(cmat *H, int i, int n_bits, cmat *Vmat, int Vsize, bool freq_inter=false){
+    
+    if(Vmat[i].rows()!=0)
+        return Vmat[i];
 
-    int t = A.cols();
-    cmat U,V;
-    vec s;
+    if(i%2==1 && freq_inter){
+        if(i==(Vsize - 1))
+            Vmat[i] = Vmat[i-1];
 
-    svd(A,U,s,V);
+        else{
 
-    GIVENSPARAMS par = givens_decomposition(V);
-    par = quantise_params(par,n_bits,t);
-    cmat V_ = givens_reconstruction(par.p,par.t,t,t);
+            Vmat[i+1] = get_quantised_precoder(H,i+1,n_bits,Vmat,Vsize);
+            Vmat[i] = 0.5*(Vmat[i-1] + Vmat[i+1]);
+        }
 
-    return V_;
+        return Vmat[i];
+    }
+    
+    else{
+
+        int t = H[i].cols();
+        cmat U,V;
+        vec s;
+
+        svd(H[i],U,s,V);
+        GIVENSPARAMS par = givens_decomposition(V);
+        par = quantise_params(par,n_bits,t);
+        Vmat[i] = givens_reconstruction(par.p,par.t,t,t);
+        return Vmat[i];
+    }
 
 }
 
@@ -169,7 +186,8 @@ int main(int argc, char const *argv[]) {
     bvec temp2;
     double cap;
 
-    bool quantise = 0;
+    bool quantise = false;
+    bool freq_inter = true;
     int n_bits=0;
 
     if (argc == 4) {
@@ -188,15 +206,19 @@ int main(int argc, char const *argv[]) {
     std::ofstream f1;
     f1.open("capacity.txt");
 
+    std::ofstream f2;
+    f2.open("H.txt");
+
     RNG_randomize();
 
     for(int snr_i = 0; snr_i < snrs_dB.length(); snr_i++) {
         
         berc.clear();
         cap = 0;
+        cmat Vmat[IFFT_size];
 
         for(int sym_i = 0; sym_i < N_ofdm_syms; sym_i++) {
-            
+
             bits[sym_i] = randb(t,constellation_size*IFFT_size);
 
             for(int i = 0; i < t; i++) {
@@ -208,10 +230,12 @@ int main(int argc, char const *argv[]) {
             take_fft(H,h,N_taps,IFFT_size);
 
             for(int i = 0; i < IFFT_size; i++) {
+
                 if(quantise)
-                    V = get_quantised_precoder(H[i],n_bits);
+                    V = get_quantised_precoder(H, i, n_bits, Vmat, IFFT_size, freq_inter);
                 else 
                     V = get_svd_precoder(H[i]);
+                // f2<< abs(V(1,0)) << "\t" <<arg(V(1,0))<<"\t"<<V(1,0) <<endl;
 
                 precoded_syms.set_col(i,V*qpsk_syms.get_col(i));
             }
@@ -231,7 +255,7 @@ int main(int argc, char const *argv[]) {
             for(int i = 0; i < IFFT_size; i++) {
                 U = get_svd_postcoder(H[i]);
                 if(quantise)
-                    V = get_quantised_precoder(H[i],n_bits);
+                    V = get_quantised_precoder(H, i, n_bits, Vmat, IFFT_size, freq_inter);
                 else 
                     V = get_svd_precoder(H[i]);
                 A = hermitian_transpose(U)*H[i]*V;
