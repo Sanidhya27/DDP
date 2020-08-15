@@ -63,20 +63,26 @@ GIVENSPARAMS quantise_params(GIVENSPARAMS par,int n_bits,int t){
     return par;
 }
 
-cmat get_quantised_precoder(const cmat *H, int i, int n_bits, cmat *Vmat, int Vsize, bool freq_inter=false){
+cmat get_quantised_precoder(const cmat *H, int i, int n_bits, cmat *Vmat, int Vsize, int freq_inter=0){
 
-    if(Vmat[i].rows()!=0)
+    if(Vmat[i].rows()!=0){
         return Vmat[i];
+    }
 
-    if(i%2==1 && freq_inter){
-        if(i==(Vsize - 1))
+    if(freq_inter && i%(freq_inter+1)!=0 ){
+        int j = i - i%(freq_inter+1) + freq_inter+1;
+        if(j==(Vsize))
             Vmat[i] = Vmat[i-1];
 
         else {
-            Vmat[i+1] = get_quantised_precoder(H,i+1,n_bits,Vmat,Vsize);
-            cmat Sim1; logm(Vmat[i - 1], Sim1);
-            cmat Sip1; logm(Vmat[i + 1], Sip1);
-            expm(0.5 * (Sim1 + Sip1), Vmat[i]);
+            int j = i - i%(freq_inter+1) + freq_inter+1;
+            Vmat[ j ] = Vmat[j].rows()!=0 ? Vmat[j] : get_quantised_precoder(H,j,n_bits,Vmat,Vsize);
+            cmat Sip1, Sim1;
+            logm(Vmat[j], Sip1);
+            j = i - i%(freq_inter+1); 
+            logm(Vmat[j], Sim1);
+            j = freq_inter+1;
+            expm(((j-i%j)*Sim1 + i%(j)*Sip1)/j, Vmat[i]);
         }
 
         return Vmat[i];
@@ -142,7 +148,7 @@ cmat pinv(cmat &A){
 int main(int argc, char const *argv[]) {
 
     if (argc < 3) {
-        cout << "Usage: " << argv[0] << " <t> <r> --optional <quant> <bits>\n";
+        cout << "Usage: " << argv[0] << " <t> <r> --optional <quant> <bits> <interpolate>\n";
         return 1;
     }
 
@@ -189,27 +195,25 @@ int main(int argc, char const *argv[]) {
     double cap;
 
     bool quantise = false;
-    bool freq_inter = true;
+    int freq_inter = 0;
     int n_bits=0;
 
     if (argc == 4) {
         quantise = atoi(argv[3]);
         if(quantise){
-            cout << "Usage: " << argv[0] << " <t> <r> --optional <quant> <bits>\n";
-            cout<<"Enter number of bits to quantise to\n";
+            cout << "Usage: " << argv[0] << " <t> <r> --optional <quant> <bits> <interpolate>\n";
+            cout<<"Enter number of bits to quantise to and do you need interpolation\n";
             return 1;
         }
     }
 
-    else if (argc == 5) {
+    else if (argc == 6) {
         quantise = atoi(argv[3]);
         n_bits = atoi(argv[4]);
+        freq_inter = atoi(argv[5]);
     }
     std::ofstream f1;
     f1.open("capacity.txt");
-
-    std::ofstream f2;
-    f2.open("H.txt");
 
     RNG_randomize();
 
@@ -217,9 +221,10 @@ int main(int argc, char const *argv[]) {
 
         berc.clear();
         cap = 0;
-        cmat Vmat[IFFT_size];
-
+        
         for(int sym_i = 0; sym_i < N_ofdm_syms; sym_i++) {
+
+            cmat Vmat[IFFT_size];
 
             bits[sym_i] = randb(t,constellation_size*IFFT_size);
 
@@ -237,7 +242,6 @@ int main(int argc, char const *argv[]) {
                     V = get_quantised_precoder(H, i, n_bits, Vmat, IFFT_size, freq_inter);
                 else
                     V = get_svd_precoder(H[i]);
-                // f2<< abs(V(1,0)) << "\t" <<arg(V(1,0))<<"\t"<<V(1,0) <<endl;
 
                 precoded_syms.set_col(i,V*qpsk_syms.get_col(i));
             }
@@ -257,7 +261,8 @@ int main(int argc, char const *argv[]) {
             for(int i = 0; i < IFFT_size; i++) {
                 U = get_svd_postcoder(H[i]);
                 if(quantise)
-                    V = get_quantised_precoder(H, i, n_bits, Vmat, IFFT_size, freq_inter);
+                    V = Vmat[i];
+                    // V = get_quantised_precoder(H, i, n_bits, Vmat, IFFT_size, freq_inter);
                 else
                     V = get_svd_precoder(H[i]);
                 A = hermitian_transpose(U)*H[i]*V;
@@ -281,8 +286,33 @@ int main(int argc, char const *argv[]) {
         cout << "The error probability was " << berc.get_errorrate() << endl;
         f<<berc.get_errorrate() << "\t" << snrs_dB[snr_i]<<endl;
         f1<<cap<<endl;
+        it_file ff;
+    ff.open("V.it");
+   
+    cmat Vmat3[IFFT_size];
+    // ff<<Name("IIV0") << Vmat[0];
+    // ff<<Name("IIV1") << Vmat[1];
+    // ff<<Name("IIV2") << Vmat[2];
+    get_quantised_precoder(H, 0,n_bits,Vmat3, IFFT_size, true);
+    get_quantised_precoder(H, 1, n_bits,Vmat3, IFFT_size, true);
+    get_quantised_precoder(H, 2, n_bits,Vmat3, IFFT_size, true);
+    ff<<Name("IV0") << Vmat3[0];
+    ff<<Name("IV1") << Vmat3[1];
+    ff<<Name("IV2") << Vmat3[2];
+    cmat Vmat2[IFFT_size];
+    get_quantised_precoder(H, 0,n_bits,Vmat2, IFFT_size, false);
+    get_quantised_precoder(H, 1, n_bits,Vmat2, IFFT_size, false);
+    get_quantised_precoder(H, 2, n_bits,Vmat2, IFFT_size, false);
+    ff<<Name("QV0") << Vmat2[0];
+    ff<<Name("QV1") << Vmat2[1];
+    ff<<Name("QV2") << Vmat2[2];
+    ff<<Name("V0") <<get_svd_precoder(H[0]);
+    ff<<Name("V1") <<get_svd_precoder(H[1]);
+    ff<<Name("V2") <<get_svd_precoder(H[2]);
+    ff.flush();
+    ff.close();
     }
-
+    
     f.close();
     return 0;
 }
