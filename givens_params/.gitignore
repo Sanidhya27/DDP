@@ -1,9 +1,11 @@
 mimo_ofdm_precoding
+mimo_ofdm_precoding_tdl
 *.o
 givens_decomposition_tests
 mimo_ofdm.txt
 *.out
 *.it
 out
+octave-workspace
 capacity.txt
 *.txt

@@ -1,15 +1,19 @@
 #include <fstream>
 #include <iostream>
 #include <string>
+#include <algorithm>
 #include "givens_decomposition.hpp"
+#include "mimo-tdl-channel.hpp"
 #include "utils.hpp"
+#include <assert.h> 
+
 #define I std::complex<double>(0,1)
 
 using namespace itpp;
 using std::cout;
 using std::cin;
 using std::endl;
-// using std::string;
+using std::string;
 
 void generate_channel(cmat *h, int L,int t,int r) {
 
@@ -27,80 +31,59 @@ void take_fft(cmat *H, const cmat *h, int L,int IFFT_size) {
         H[i]/=IFFT_size;
     }
 }
+void delta_quantise(vec &p,vec &quant, vec &state, vec &delta){
 
-void quantise_phi(vec &p, int n_bits){
+    for(int i =0;i<p.length();i++){
 
-    // For n bits divide -3.14 to 3.14 in 2^n regions
-    vec reg = linspace(-1*M_PI, M_PI, pow2(n_bits));
-    int index;
-    for(int i = 0; i < p.length(); i++){
-        min(abs(reg-p(i)), index);
-        p(i) = reg(index);
-    }
-}
-
-void quantise_theta(vec &theta,int n_bits,int t){
-
-    it_file ff;
-    ff.open(std::to_string(n_bits) + "bits.it");
-    mat codes;
-    ff >> Name("c") >> codes;
-    int index;
-    int j=0;
-    for(int i=0;i<t-1;i++){
-        for(int l=0;l<t-1-i;l++){
-            min(abs(codes.get_col(l)-theta(j)), index);
-            theta(j) = codes.get_col(l)(index);
-            j++;
+        if(quant(i) < p(i)){
+            if(state(i)==1)
+                delta(i) = delta(i)*2;
+            else
+                delta(i)=delta(i)/2;
+            state(i) = 1;
+            // cout<<"yo"<<quant(i)<<" "<<delta(i)<<endl;
+            quant(i) = quant(i) + delta(i);
+            // cout<<"yo2"<<quant(i)<<endl;
+        }
+        else if(quant(i) > p(i)){
+            if(state(i)==0)
+                delta(i) = delta(i)*2;
+            else
+                delta(i) = delta(i)/2;
+            state(i) = 0;   
+            quant(i) = quant(i) - delta(i);    
         }
     }
 }
+cmat get_delta_quantised_precoder(const cmat *H, int i, cmat *Vmat, GIVENSPARAMS &quant, vec &p_delta,vec &p_state, vec &t_delta, vec &t_state){
 
-GIVENSPARAMS quantise_params(GIVENSPARAMS par,int n_bits,int t){
+    int t = H[i].cols();
+    cmat U,V;
+    vec s;
 
-    quantise_phi(par.p, n_bits);
-    quantise_theta(par.t,n_bits,t);
-    return par;
-}
+    svd(H[i],U,s,V);
+    GIVENSPARAMS par = givens_decomposition(V);
 
-cmat get_quantised_precoder(const cmat *H, int i, int n_bits, cmat *Vmat, int Vsize, int freq_inter=0){
-
-    if(Vmat[i].rows()!=0){
-        return Vmat[i];
+    if(quant.p.length()==0){
+        quant.p = zeros(par.p.length());
+        p_delta = 0.25*ones(par.p.length());
+        p_state = zeros(par.p.length());
+    }
+    if(quant.t.length()==0){
+        quant.t = zeros(par.t.length());
+        t_delta = 0.25*ones(par.t.length());
+        t_state = zeros(par.t.length());
     }
 
-    if(freq_inter && i%(freq_inter+1)!=0 ){
-        int j = i - i%(freq_inter+1) + freq_inter+1;
-        if(j==(Vsize))
-            Vmat[i] = Vmat[i-1];
-
-        else {
-            int j = i - i%(freq_inter+1) + freq_inter+1;
-            Vmat[ j ] = Vmat[j].rows()!=0 ? Vmat[j] : get_quantised_precoder(H,j,n_bits,Vmat,Vsize);
-            cmat Sip1, Sim1;
-            logm(Vmat[j], Sip1);
-            j = i - i%(freq_inter+1); 
-            logm(Vmat[j], Sim1);
-            j = freq_inter+1;
-            expm(((j-i%j)*Sim1 + i%(j)*Sip1)/j, Vmat[i]);
-        }
-
-        return Vmat[i];
-    }
-
-    else{
-
-        int t = H[i].cols();
-        cmat U,V;
-        vec s;
-
-        svd(H[i],U,s,V);
-        GIVENSPARAMS par = givens_decomposition(V);
-        par = quantise_params(par,n_bits,t);
-        Vmat[i] = givens_reconstruction(par.p,par.t,t,t);
-        return Vmat[i];
-    }
-
+    delta_quantise(par.p,quant.p,p_state,p_delta);
+    delta_quantise(par.t,quant.t,t_state,t_delta);
+    // cout<<"paramss"<<endl;
+    // cout<<par.p<<endl;
+    // cout<<quant.p<<endl;
+    // cout<<par.t<<endl;
+    // cout<<quant.t<<endl;
+    Vmat[i] = givens_reconstruction(quant.p,quant.t,t,t);
+    return Vmat[i];
 }
 
 double capacity(mat &F, int t){
@@ -164,13 +147,13 @@ int main(int argc, char const *argv[]) {
     int N_ofdm_syms = 1000;
     int N_taps = 5;
     int IFFT_size = 64;
-    int CP_size = 6;
+    int CP_size =6;
     int constellation_size = 2;
 
     QPSK qpsk;
     BERC berc;
     OFDM ofdm;
-
+    
     ofdm.set_parameters(IFFT_size,CP_size,1);
 
     vec snrs_dB="0:2:20";
@@ -184,9 +167,6 @@ int main(int argc, char const *argv[]) {
     cmat dec_ofdm_syms = zeros_c(r,IFFT_size);
     cmat dec_syms = zeros_c(t,IFFT_size);
     bmat dec_bits[N_ofdm_syms];
-
-    cmat h[N_taps];
-    cmat H[IFFT_size];
 
     cmat V,U,A;
     mat F;
@@ -219,6 +199,18 @@ int main(int argc, char const *argv[]) {
 
     for(int snr_i = 0; snr_i < snrs_dB.length(); snr_i++) {
 
+        MIMO_TDL_Channel mimo_tdl_channel(r,t);
+        // mimo_tdl_channel.set_channel_profile_uniform (4);
+        mimo_tdl_channel.set_channel_profile(itpp::ITU_Pedestrian_A, 5e-8);
+        mimo_tdl_channel.set_norm_doppler(1e-4);
+        N_taps = mimo_tdl_channel.taps();
+        assert(N_taps < CP_size);
+
+        GIVENSPARAMS quant[IFFT_size];
+        vec p_delta[IFFT_size],p_state[IFFT_size],t_state[IFFT_size],t_delta[IFFT_size];
+
+        cmat h[N_taps];
+        cmat H[IFFT_size];
         berc.clear();
         cap = 0;
         
@@ -233,18 +225,20 @@ int main(int argc, char const *argv[]) {
                 qpsk_syms.set_row(i, temp);
             }
 
-            generate_channel(h,N_taps,t,r);
+            mimo_tdl_channel.generate(h);
             take_fft(H,h,N_taps,IFFT_size);
-
+            // cout<<N_taps<<" "<<h[0]<<" "<<H[0]<<endl;
             for(int i = 0; i < IFFT_size; i++) {
 
                 if(quantise)
-                    V = get_quantised_precoder(H, i, n_bits, Vmat, IFFT_size, freq_inter);
+                    V = get_delta_quantised_precoder(H,i,Vmat,quant[i],p_delta[i],p_state[i],t_delta[i],t_state[i]);
                 else
                     V = get_svd_precoder(H[i]);
 
                 precoded_syms.set_col(i,V*qpsk_syms.get_col(i));
+                // cout<<quantise<<i<<" "<<V<<"\n"<<get_svd_precoder(H[i])<<endl;
             }
+            // cout<<"test"<<get_svd_precoder(H[IFFT_size-1])(0,0)<<" "<<V(0,0)<<endl;
 
             for(int i = 0; i < t; i++) {
                 ofdm_syms.set_row(i, ofdm.modulate(precoded_syms.get_row(i)));
@@ -262,7 +256,6 @@ int main(int argc, char const *argv[]) {
                 U = get_svd_postcoder(H[i]);
                 if(quantise)
                     V = Vmat[i];
-                    // V = get_quantised_precoder(H, i, n_bits, Vmat, IFFT_size, freq_inter);
                 else
                     V = get_svd_precoder(H[i]);
                 A = hermitian_transpose(U)*H[i]*V;
@@ -285,32 +278,6 @@ int main(int argc, char const *argv[]) {
         cout << "There were " << berc.get_corrects() << " correctly received bits." << endl;
         cout << "The error probability was " << berc.get_errorrate() << endl;
         f<<berc.get_errorrate() << "\t" << snrs_dB[snr_i]<<endl;
-    //     f1<<cap<<endl;
-    //     it_file ff;
-    // ff.open("V.it");
-   
-    // cmat Vmat3[IFFT_size];
-    // // ff<<Name("IIV0") << Vmat[0];
-    // // ff<<Name("IIV1") << Vmat[1];
-    // // ff<<Name("IIV2") << Vmat[2];
-    // get_quantised_precoder(H, 0,n_bits,Vmat3, IFFT_size, true);
-    // get_quantised_precoder(H, 1, n_bits,Vmat3, IFFT_size, true);
-    // get_quantised_precoder(H, 2, n_bits,Vmat3, IFFT_size, true);
-    // ff<<Name("IV0") << Vmat3[0];
-    // ff<<Name("IV1") << Vmat3[1];
-    // ff<<Name("IV2") << Vmat3[2];
-    // cmat Vmat2[IFFT_size];
-    // get_quantised_precoder(H, 0,n_bits,Vmat2, IFFT_size, false);
-    // get_quantised_precoder(H, 1, n_bits,Vmat2, IFFT_size, false);
-    // get_quantised_precoder(H, 2, n_bits,Vmat2, IFFT_size, false);
-    // ff<<Name("QV0") << Vmat2[0];
-    // ff<<Name("QV1") << Vmat2[1];
-    // ff<<Name("QV2") << Vmat2[2];
-    // ff<<Name("V0") <<get_svd_precoder(H[0]);
-    // ff<<Name("V1") <<get_svd_precoder(H[1]);
-    // ff<<Name("V2") <<get_svd_precoder(H[2]);
-    // ff.flush();
-    // ff.close();
     }
     
     f.close();
